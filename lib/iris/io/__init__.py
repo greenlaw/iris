@@ -107,6 +107,9 @@ def decode_uri(uri, default="file"):
         >>> print(decode_uri('file:///data/local/dataZoo/...'))
         ('file', '///data/local/dataZoo/...')
 
+        >>> print(decode_uri('s3://bucket/dataZoo/...'))
+        ('s3', '//bucket/dataZoo/...')
+
         >>> print(decode_uri('/data/local/dataZoo/...'))
         ('file', '/data/local/dataZoo/...')
 
@@ -252,6 +255,52 @@ def load_http(urls, callback):
     for handling_format_spec in sorted(handler_map):
         fnames = handler_map[handling_format_spec]
         for cube in handling_format_spec.handler(fnames, callback):
+            yield cube
+
+
+def load_s3(uris, callback, **kwargs):
+    """
+    Takes a list of S3 uris in the form //<bucket>/<key> and a callback function,
+    and returns a generator of Cubes from the given objects.
+
+    The URI format is expected to match what is returned by decode_uri.
+
+    Any provided extra kwargs will be passed to the format handler.
+
+    .. note::
+
+        Typically, this function should not be called directly; instead, the
+        intended interface for loading is :func:`iris.load`.
+
+    """
+    # Create default dict mapping iris format handler to its associated filenames
+    from iris.fileformats import FORMAT_AGENT
+    try:
+        from s3fs import S3FileSystem
+    except ImportError:
+        raise RuntimeError(
+            "Unable to read file from S3 - "
+            '"s3fs" package is not installed.'
+        )
+
+    if "fs" in kwargs:
+        fs = kwargs["fs"]
+    else:
+        fs = S3FileSystem()
+
+    handler_map = collections.defaultdict(list)
+    for uri in uris:
+        assert uri.startswith("//"), f"Invalid S3 URI detected: {uri}"
+        uri_with_proto = f"s3:{uri}"
+        uri_without_proto = uri[2:]
+        with fs.open(uri_without_proto, "rb", block_size=100) as header_buffer:
+            handling_format_spec = FORMAT_AGENT.get_spec(uri, header_buffer)
+            handler_map[handling_format_spec].append(uri_with_proto)
+
+    # Call each iris format handler with the appropriate filenames
+    for handling_format_spec in sorted(handler_map):
+        handler_uris = handler_map[handling_format_spec]
+        for cube in handling_format_spec.handler(handler_uris, callback, **kwargs):
             yield cube
 
 

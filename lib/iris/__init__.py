@@ -254,7 +254,7 @@ else:
     _update(site_configuration)
 
 
-def _generate_cubes(uris, callback, constraints):
+def _generate_cubes(uris, callback, constraints, **kwargs):
     """Returns a generator of cubes given the URIs and a callback."""
     if isinstance(uris, (str, pathlib.PurePath)):
         uris = [uris]
@@ -262,7 +262,6 @@ def _generate_cubes(uris, callback, constraints):
     # Group collections of uris by their iris handler
     # Create list of tuples relating schemes to part names
     uri_tuples = sorted(iris.io.decode_uri(uri) for uri in uris)
-
     for scheme, groups in itertools.groupby(uri_tuples, key=lambda x: x[0]):
         # Call each scheme handler with the appropriate URIs
         if scheme == "file":
@@ -273,15 +272,19 @@ def _generate_cubes(uris, callback, constraints):
             urls = [":".join(x) for x in groups]
             for cube in iris.io.load_http(urls, callback):
                 yield cube
+        elif scheme == "s3":
+            paths = [x[1] for x in groups]
+            for cube in iris.io.load_s3(paths, callback, **kwargs):
+                yield cube
         else:
             raise ValueError("Iris cannot handle the URI scheme: %s" % scheme)
 
 
-def _load_collection(uris, constraints=None, callback=None):
+def _load_collection(uris, constraints=None, callback=None, **kwargs):
     from iris.cube import _CubeFilterCollection
 
     try:
-        cubes = _generate_cubes(uris, callback, constraints)
+        cubes = _generate_cubes(uris, callback, constraints, **kwargs)
         result = _CubeFilterCollection.from_cubes(cubes, constraints)
     except EOFError as e:
         raise iris.exceptions.TranslationError(
@@ -290,7 +293,7 @@ def _load_collection(uris, constraints=None, callback=None):
     return result
 
 
-def load(uris, constraints=None, callback=None):
+def load(uris, constraints=None, callback=None, **kwargs):
     """
     Loads any number of Cubes for each constraint.
 
@@ -316,7 +319,7 @@ def load(uris, constraints=None, callback=None):
         were random.
 
     """
-    return _load_collection(uris, constraints, callback).merged().cubes()
+    return _load_collection(uris, constraints, callback, **kwargs).merged().cubes()
 
 
 def load_cube(uris, constraint=None, callback=None):
@@ -369,8 +372,8 @@ def load_cubes(uris, constraints=None, callback=None):
     Args:
 
     * uris:
-        One or more filenames/URIs, as a string or :class:`pathlib.PurePath`.
-        If supplying a URL, only OPeNDAP Data Sources are supported.
+        One or more filenames or s3/http URIs, as a string or :class:`pathlib.PurePath`.
+        If supplying an http URL, only OPeNDAP Data Sources are supported.
 
     Kwargs:
 
